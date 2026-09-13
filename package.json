@@ -1,0 +1,21 @@
+{
+  "name": "dragonrematch",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p ${PORT:-3000}",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.183.0",
+    "@react-three/fiber": "^8.18.0",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/xr": "^6.6.30",
+    "@google/model-viewer": "^4.3.1"
+  }
+}
