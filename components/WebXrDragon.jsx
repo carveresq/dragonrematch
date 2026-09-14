@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { useAnimations, useGLTF } from "@react-three/drei";
 import {
   XR,
   IfInSessionMode,
@@ -12,60 +11,9 @@ import {
   useXRRequestHitTest,
 } from "@react-three/xr";
 import * as THREE from "three";
-import { retargetClipByName } from "../lib/retargetClip";
+import { useRetargetedDragon } from "../lib/useRetargetedDragon";
 
-const IDLE_URL = "/models/dragon_idle.glb";
-const ATTACK_URL = "/models/dragon_attack.glb";
-const BASE_URL = "/models/dragon.glb";
-
-useGLTF.preload(BASE_URL);
-useGLTF.preload(IDLE_URL);
-useGLTF.preload(ATTACK_URL);
-
-/**
- * Loads the base dragon mesh+skeleton and retargets the idle/attack clips
- * (baked against their own standalone armatures in separate GLBs) onto it by
- * bone name. See lib/retargetClip.js for why this is safe here: verified
- * offline that bone names and rest-pose rotations already match within
- * floating-point noise across all three files, so this is a defensive
- * name-matching pass rather than a coordinate-system fix.
- */
-function useRetargetedDragon() {
-  const base = useGLTF(BASE_URL);
-  const idleGltf = useGLTF(IDLE_URL);
-  const attackGltf = useGLTF(ATTACK_URL);
-
-  const scene = useMemo(() => base.scene, [base.scene]);
-
-  const clips = useMemo(() => {
-    const idle = idleGltf.animations[0]
-      ? retargetClipByName(idleGltf.animations[0], scene, { clipName: "idle" })
-      : null;
-    const attack = attackGltf.animations[0]
-      ? retargetClipByName(attackGltf.animations[0], scene, {
-          clipName: "attack",
-        })
-      : null;
-    return [idle, attack].filter(Boolean);
-  }, [idleGltf.animations, attackGltf.animations, scene]);
-
-  useEffect(() => {
-    scene.traverse((obj) => {
-      if (!obj.isMesh) return;
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-      if (obj.material?.map) {
-        obj.material.map.colorSpace = THREE.SRGBColorSpace;
-        obj.material.map.needsUpdate = true;
-      }
-    });
-  }, [scene]);
-
-  const { actions } = useAnimations(clips, scene);
-  return { scene, actions };
-}
-
-function Dragon() {
+export function Dragon() {
   const { scene, actions } = useRetargetedDragon();
   const attackingRef = useRef(false);
 

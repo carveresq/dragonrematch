@@ -13,6 +13,11 @@ const QuickLookDragon = dynamic(() => import("./QuickLookDragon"), {
   loading: () => <Placeholder text="Loading preview…" />,
 });
 
+const WebcamDragon = dynamic(() => import("./WebcamDragon"), {
+  ssr: false,
+  loading: () => <Placeholder text="Loading camera…" />,
+});
+
 function Placeholder({ text }) {
   return (
     <div
@@ -79,6 +84,8 @@ export default function DragonRematchExperience() {
             "Tap Start AR, point your camera at the floor or a table, then tap where you want it. Tap the dragon once it's placed to make it attack."}
           {capability === "quicklook" &&
             "WebXR AR isn't available in this browser yet. Here's a 3D preview — tap below to drop it into your space with Apple's AR viewer."}
+          {capability === "webcam" &&
+            "Your browser can't do phone-style AR, but the dragon can still show up over your webcam — grant camera access below."}
           {capability === "checking" && "Checking what your device can do…"}
         </p>
 
@@ -91,6 +98,7 @@ export default function DragonRematchExperience() {
         >
           {capability === "webxr" && <WebXrDragon />}
           {capability === "quicklook" && <QuickLookDragon />}
+          {capability === "webcam" && <WebcamDragon />}
           {capability === "checking" && <Placeholder text="Checking device…" />}
         </div>
 
