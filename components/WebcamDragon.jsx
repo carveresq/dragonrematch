@@ -1,134 +1,84 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
-import * as THREE from "three";
-import { useRetargetedDragon } from "../lib/useRetargetedDragon";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Canvas } from "@react-three/fiber";
 
-function LoadingLabel() {
-  return (
-    <Html center>
-      <div
-        style={{
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontSize: 11,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "rgba(255,255,255,0.6)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        Loading dragon…
-      </div>
-    </Html>
-  );
-}
+import DragonScene from "./DragonScene";
+import DragonHud from "./DragonHud";
 
-// Laptops/desktops get neither real WebXR immersive-ar (no headset) nor
-// Apple AR Quick Look (not iOS) -- see lib/useArCapability.js. Rather than
-// leave them with no camera-based experience at all, this composites the
-// same dragon model (reused via lib/useRetargetedDragon.js, shared with
-// WebXrDragon.jsx, idle/attack animations included) over the device's own
-// webcam feed via a
-// transparent <Canvas>. There's no depth/surface tracking here (a plain
-// webcam has no way to do that) -- it's a camera-passthrough-plus-3D-overlay
-// experience, not true markerless AR, but it's a real, working camera-based
-// dragon instead of a static orbit-only preview.
+// Laptops and desktops get neither real WebXR immersive-ar (no headset) nor
+// Apple AR Quick Look (not iOS) -- and as of this round, iPhones and iPads are
+// routed here too rather than into Quick Look. See lib/useArCapability.js for
+// why: Quick Look is Apple's own system viewer, so a page can put a model in
+// it but cannot put fire, lasers, a health bar or a dodge mechanic in it. The
+// interactive fight has to live somewhere the page still controls the frame,
+// which means a <Canvas> composited over the device's own camera feed.
 //
-// Framing is computed from the model's actual bounding box on load rather
-// than a hand-picked camera position -- the WebXR path's dragon gets scaled
-// by AR hit-test placement, but here there's no such reference, and a fixed
-// distance either clipped the model or shrank it to a speck depending on
-// viewport size during testing.
-function AutoFramedDragon() {
-  const { scene, actions } = useRetargetedDragon();
-  const { camera } = useThree();
-  const attackingRef = useRef(false);
-  const framedRef = useRef(false);
+// There is no depth or surface tracking here -- a plain camera feed has no way
+// to do that -- so this is camera-passthrough-plus-3D-overlay rather than true
+// markerless AR. What it is not is a static preview: the dragon is the same
+// 6 m creature, on the same timings, with the same fight as the AR path.
+//
+// Framing is NOT auto-fitted to the model's bounding box any more. It used to
+// be, and that quietly defeated the whole point of this round: fitting the
+// camera to the model normalises the dragon's size away, so making it bigger
+// changed nothing on screen. The scene now works in metres (see DragonScene),
+// and the camera sits at a fixed 1.6 m eye height looking slightly up.
 
-  useEffect(() => {
-    const idleAction = actions.idle;
-    if (!idleAction) return;
-    idleAction.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.3).play();
-  }, [actions]);
-
-  useEffect(() => {
-    if (framedRef.current) return;
-    const box = new THREE.Box3().setFromObject(scene);
-    if (box.isEmpty()) return;
-    framedRef.current = true;
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    const fovRadians = ((camera.fov || 50) * Math.PI) / 180;
-    const distance = (maxDim / 2 / Math.tan(fovRadians / 2)) * 1.5;
-    camera.position.set(center.x, center.y, center.z + distance);
-    camera.lookAt(center);
-    camera.updateProjectionMatrix();
-  }, [scene, camera]);
-
-  const handleTapDragon = useCallback(
-    (event) => {
-      event.stopPropagation();
-      const attackAction = actions.attack;
-      const idleAction = actions.idle;
-      if (!attackAction || attackingRef.current) return;
-      attackingRef.current = true;
-
-      attackAction.reset();
-      attackAction.setLoop(THREE.LoopOnce, 1);
-      attackAction.clampWhenFinished = true;
-      if (idleAction) {
-        attackAction.crossFadeFrom(idleAction, 0.15, false);
-      }
-      attackAction.play();
-
-      const mixer = attackAction.getMixer();
-      const onFinished = (finishedEvent) => {
-        if (finishedEvent.action !== attackAction) return;
-        mixer.removeEventListener("finished", onFinished);
-        attackingRef.current = false;
-        if (idleAction) {
-          idleAction.reset().play();
-          attackAction.crossFadeTo(idleAction, 0.3, false);
-        }
-      };
-      mixer.addEventListener("finished", onFinished);
-    },
-    [actions],
-  );
-
-  return <primitive object={scene} onClick={handleTapDragon} />;
-}
+/* Hoisted to module scope, and carrying NO position.
+ *
+ * react-three-fiber re-applies the `camera` prop whenever its identity
+ * changes, and an object literal written inline in JSX is a new identity on
+ * every single render. DragonScene moves this camera every frame (that is how
+ * you dodge), so an inline literal fights it: the player advances exactly one
+ * frame's worth, gets snapped back to the prop's position, and the dodge
+ * silently does not work. That was measured -- 0.06 m of travel at 4.6 m/s is
+ * one frame at 75 Hz, repeating forever.
+ *
+ * Position is deliberately omitted rather than merely frozen, so there is one
+ * owner of where the camera is: DragonScene. Lens settings stay here.
+ */
+const CAMERA = { fov: 55, near: 0.1, far: 200 };
+const GL = { alpha: true, antialias: true };
 
 function cameraErrorMessage(err) {
   if (err?.name === "NotAllowedError") {
     return "Camera permission was denied — allow it in your browser's address bar and try again.";
   }
-  if (err?.name === "NotFoundError") {
-    return "No camera was found on this device.";
-  }
-  if (err?.name === "NotReadableError") {
-    return "The camera is already in use by another app.";
-  }
+  if (err?.name === "NotFoundError") return "No camera was found on this device.";
+  if (err?.name === "NotReadableError") return "The camera is already in use by another app.";
   return err?.message || "Couldn't access the camera.";
 }
 
 export default function WebcamDragon() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const controlsRef = useRef({ x: 0, z: 0 });
   const [status, setStatus] = useState("idle"); // idle | starting | active | error
   const [errorMsg, setErrorMsg] = useState("");
+  const [snapshot, setSnapshot] = useState(null);
+  const [runId, setRunId] = useState(0);
+
+  /* ?nocam=1 mounts the fight over a flat backdrop with no getUserMedia call.
+     It exists so the scene can be driven and screenshotted without a camera
+     permission prompt in the way -- automated checks stall on that dialog, and
+     "the dragon renders" and "the fight actually works" are different
+     questions. Harmless in production: it only skips the camera. */
+  const noCam = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("nocam") === "1";
+  }, []);
+
+  useEffect(() => {
+    if (noCam) setStatus("active");
+  }, [noCam]);
 
   const handleEnable = useCallback(async () => {
     setStatus("starting");
     setErrorMsg("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: { facingMode: "environment" },
         audio: false,
       });
       streamRef.current = stream;
@@ -143,21 +93,27 @@ export default function WebcamDragon() {
     }
   }, []);
 
-  useEffect(() => {
-    return () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-    };
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
+
+  const handleReplay = useCallback(() => {
+    setSnapshot(null);
+    setRunId((n) => n + 1);
+  }, []);
+
+  const hitFlash = snapshot?.playerHitFlashUntil ?? 0;
 
   return (
     <div
       style={{
         position: "relative",
         width: "100%",
-        height: "70vh",
-        minHeight: 420,
+        height: "76vh",
+        minHeight: 460,
         overflow: "hidden",
-        background: "#000",
+        background: "#05070a",
+        touchAction: "none",
       }}
     >
       <video
@@ -171,24 +127,52 @@ export default function WebcamDragon() {
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          transform: "scaleX(-1)",
-          display: status === "active" ? "block" : "none",
+          display: status === "active" && !noCam ? "block" : "none",
         }}
       />
 
       {status === "active" && (
-        <Canvas
-          style={{ position: "absolute", inset: 0 }}
-          camera={{ position: [0, 0, 5], fov: 50 }}
-          gl={{ alpha: true }}
-          onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
-        >
-          <ambientLight intensity={0.65} />
-          <directionalLight position={[2, 4, 2]} intensity={1.3} />
-          <Suspense fallback={<LoadingLabel />}>
-            <AutoFramedDragon />
-          </Suspense>
-        </Canvas>
+        <>
+          <Canvas
+            key={runId}
+            style={{ position: "absolute", inset: 0 }}
+            camera={CAMERA}
+            gl={GL}
+            onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
+          >
+            <DragonScene
+              mode="camera"
+              groundY={0}
+              controlsRef={controlsRef}
+              onSnapshot={setSnapshot}
+            />
+          </Canvas>
+
+          <DragonHud
+            snapshot={snapshot}
+            controlsRef={controlsRef}
+            showDodgePad
+            onReplay={handleReplay}
+          />
+
+          {/* A hit is easy to miss when you are looking at the dragon rather
+              than at the bar -- so the whole frame takes the hit too. */}
+          <div
+            /* Namespaced: the sibling <Canvas> is keyed on runId, and both
+               start at 0, which React reads as a duplicate key among the
+               fragment's children. */
+            key={`hit-${hitFlash}`}
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              boxShadow: "inset 0 0 120px 20px rgba(255,60,30,0.75)",
+              opacity: 0,
+              animation: hitFlash ? "cesq-player-hit 450ms ease-out" : "none",
+            }}
+          />
+          <style>{`@keyframes cesq-player-hit { 0% { opacity: 1 } 100% { opacity: 0 } }`}</style>
+        </>
       )}
 
       {status !== "active" && (
@@ -211,12 +195,12 @@ export default function WebcamDragon() {
               fontSize: 12,
               letterSpacing: "0.04em",
               color: "rgba(255,255,255,0.78)",
-              maxWidth: 360,
+              maxWidth: 380,
               lineHeight: 1.6,
             }}
           >
-            This browser can&apos;t do phone-style AR, but the dragon can still
-            appear over your webcam. Grant camera access to continue.
+            Round 4 happens over your camera. Grant access, then dodge the fire
+            on the floor and shoot back.
           </p>
           <button
             type="button"

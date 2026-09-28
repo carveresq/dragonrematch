@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import {
   XR,
@@ -11,55 +11,9 @@ import {
   useXRRequestHitTest,
 } from "@react-three/xr";
 import * as THREE from "three";
-import { useRetargetedDragon } from "../lib/useRetargetedDragon";
 
-export function Dragon() {
-  const { scene, actions } = useRetargetedDragon();
-  const attackingRef = useRef(false);
-
-  useEffect(() => {
-    const idleAction = actions.idle;
-    if (!idleAction) return;
-    idleAction.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.3).play();
-  }, [actions]);
-
-  const handleTapDragon = useCallback(
-    (event) => {
-      event.stopPropagation();
-      const attackAction = actions.attack;
-      const idleAction = actions.idle;
-      if (!attackAction || attackingRef.current) return;
-      attackingRef.current = true;
-
-      attackAction.reset();
-      attackAction.setLoop(THREE.LoopOnce, 1);
-      attackAction.clampWhenFinished = true;
-      if (idleAction) {
-        attackAction.crossFadeFrom(idleAction, 0.15, false);
-      }
-      attackAction.play();
-
-      const mixer = attackAction.getMixer();
-      const onFinished = (finishedEvent) => {
-        if (finishedEvent.action !== attackAction) return;
-        mixer.removeEventListener("finished", onFinished);
-        attackingRef.current = false;
-        if (idleAction) {
-          idleAction.reset().play();
-          attackAction.crossFadeTo(idleAction, 0.3, false);
-        }
-      };
-      mixer.addEventListener("finished", onFinished);
-    },
-    [actions],
-  );
-
-  // No fallback path currently triggers: if either animation clip failed to
-  // retarget, `actions.idle`/`actions.attack` are simply undefined, and the
-  // dragon renders in its authored rest (T/bind) pose instead of erroring --
-  // that's the documented worst-case MVP fallback (static pose, no motion).
-  return <primitive object={scene} onClick={handleTapDragon} />;
-}
+import DragonScene from "./DragonScene";
+import DragonHud from "./DragonHud";
 
 const overlayStyles = {
   wrap: {
@@ -113,7 +67,7 @@ function PlacementReticle() {
   );
 }
 
-function PlacementController() {
+function PlacementController({ onSnapshot, fireRef }) {
   const [placedMatrix, setPlacedMatrix] = useState(null);
   const requestHitTest = useXRRequestHitTest();
 
@@ -144,18 +98,40 @@ function PlacementController() {
         </>
       )}
       {placedMatrix && (
+        /* The anchor group is driven straight from the hit-test matrix with
+           matrixAutoUpdate off, so anything set on THIS group's transform is
+           overwritten every frame. The dragon's fitted scale therefore has to
+           live on a group nested inside it -- DragonRig owns that group. Do
+           not "simplify" by scaling here; it silently does nothing.
+
+           groundY is 0 because inside this anchor the detected floor IS the
+           local origin. DragonScene never assumes that on its own, which is
+           what lets the same scene run in the camera path where it is not. */
         <group matrix={placedMatrix} matrixAutoUpdate={false}>
-          <Dragon />
+          <DragonScene mode="xr" groundY={0} onSnapshot={onSnapshot} fireRef={fireRef} />
         </group>
       )}
     </>
   );
 }
 
+/**
+ * Real AR on Android. Aiming is a fixed centre crosshair rather than touching
+ * the dragon directly: you point by turning the phone and tap to fire. That
+ * avoids depending on @react-three/xr delivering a touch as a 3D pointer
+ * inside an immersive session -- which could not be verified without an
+ * Android device -- and a gun sight is the better feel anyway.
+ *
+ * The tap goes through the same fireAt(ndcX, ndcY) the camera path uses, with
+ * the centre of the view (0, 0) substituted for the cursor, so there is one
+ * raycast-and-damage path rather than two.
+ */
 export default function WebXrDragon() {
   const store = useMemo(() => createXRStore(), []);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState(null);
+  const [snapshot, setSnapshot] = useState(null);
+  const fireRef = useRef(null);
 
   const handleStart = useCallback(async () => {
     setStarting(true);
@@ -173,8 +149,12 @@ export default function WebXrDragon() {
     }
   }, [store]);
 
+  const handleFire = useCallback(() => {
+    fireRef.current?.(0, 0);
+  }, []);
+
   return (
-    <div style={{ position: "relative", width: "100%", height: "70vh", minHeight: 420 }}>
+    <div style={{ position: "relative", width: "100%", height: "76vh", minHeight: 460 }}>
       <button
         type="button"
         onClick={handleStart}
@@ -220,9 +200,21 @@ export default function WebXrDragon() {
       )}
       <Canvas shadows style={{ width: "100%", height: "100%" }} camera={{ position: [0, 1.2, 2] }}>
         <XR store={store}>
-          <ambientLight intensity={0.65} />
-          <directionalLight position={[2, 4, 2]} intensity={1.3} castShadow />
-          <PlacementController />
+          <PlacementController onSnapshot={setSnapshot} fireRef={fireRef} />
+          <IfInSessionMode allow="immersive-ar">
+            <XRDomOverlay>
+              {/* In AR you move by walking, so no dodge pad -- but the
+                  crosshair and the fire button have to be in the overlay,
+                  since nothing drawn in WebGL can be tapped as UI. */}
+              <DragonHud
+                snapshot={snapshot}
+                showDodgePad={false}
+                showReticle
+                onFire={handleFire}
+                onReplay={() => window.location.reload()}
+              />
+            </XRDomOverlay>
+          </IfInSessionMode>
         </XR>
       </Canvas>
     </div>

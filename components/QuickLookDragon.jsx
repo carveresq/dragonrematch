@@ -6,13 +6,26 @@
 // context.
 import "@google/model-viewer";
 
-export default function QuickLookDragon() {
+/**
+ * Apple AR Quick Look, demoted this round from "the iOS experience" to a
+ * secondary button beside it.
+ *
+ * Quick Look is a system viewer: it renders a USDZ in the user's real room
+ * with proper tracking, which is the one thing it does better than anything
+ * the page can draw itself -- and it is also the end of the page's control.
+ * No fire, no lasers, no ground telegraph, no health bar can be added to it,
+ * because none of that is the page's to add. So the fight lives in
+ * WebcamDragon and this stays for what it is good at.
+ *
+ * Note the dragon here is whatever size the USDZ was authored at, NOT the 6 m
+ * the interactive scene stands it at: ar-scale="fixed" honours the asset's own
+ * units, and re-exporting dragon.usdz at real-world scale is an asset job
+ * rather than a code one. It is the one place in the exhibit where the size
+ * work does not reach.
+ */
+export default function QuickLookDragon({ compact = false }) {
   return (
     <div style={{ width: "100%" }}>
-      {/* @google/model-viewer: first-class ar-scale + ios-src (USDZ) + ar-modes
-          support for launching Apple AR Quick Look directly -- WebXR immersive-ar
-          isn't available in Safari/iOS as of Sep 2026, so this is the fallback
-          path rather than a second attempt at the same @react-three/xr flow. */}
       <model-viewer
         src="/models/dragon.glb"
         ios-src="/models/dragon.usdz"
@@ -26,8 +39,8 @@ export default function QuickLookDragon() {
         exposure="1"
         style={{
           width: "100%",
-          height: "56vh",
-          minHeight: 360,
+          height: compact ? "34vh" : "56vh",
+          minHeight: compact ? 220 : 360,
           background: "transparent",
           "--poster-color": "transparent",
         }}

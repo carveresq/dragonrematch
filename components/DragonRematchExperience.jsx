@@ -1,6 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useState } from "react";
+
 import { useArCapability } from "../lib/useArCapability";
 
 const WebXrDragon = dynamic(() => import("./WebXrDragon"), {
@@ -39,8 +41,17 @@ function Placeholder({ text }) {
   );
 }
 
+const HOW = {
+  webxr:
+    "Tap Start AR, point your camera at the floor, then tap to place it. Keep the crosshair on the dragon and tap Fire — and when a ring lights up on the floor, walk out of it.",
+  camera:
+    "Dodge the ring on the floor before it breathes, and click the dragon to fire back. Arrow keys or WASD to move; on a phone, use the pad in the corner.",
+  checking: "Checking what your device can do…",
+};
+
 export default function DragonRematchExperience() {
-  const capability = useArCapability();
+  const { mode, quickLook } = useArCapability();
+  const [showQuickLook, setShowQuickLook] = useState(false);
 
   return (
     <main
@@ -68,25 +79,13 @@ export default function DragonRematchExperience() {
         </div>
 
         <p style={{ marginTop: 14, fontSize: 15, lineHeight: 1.7 }}>
-          You already beat it twice. This is the part where it comes back —
-          full size, in the room you&apos;re standing in right now.
+          You already beat it twice. This is the part where it comes back — six
+          metres of it, in the room you&apos;re standing in right now, and this
+          time it breathes.
         </p>
 
-        <p
-          style={{
-            marginTop: 10,
-            fontSize: 13,
-            lineHeight: 1.7,
-            opacity: 0.65,
-          }}
-        >
-          {capability === "webxr" &&
-            "Tap Start AR, point your camera at the floor or a table, then tap where you want it. Tap the dragon once it's placed to make it attack."}
-          {capability === "quicklook" &&
-            "WebXR AR isn't available in this browser yet. Here's a 3D preview — tap below to drop it into your space with Apple's AR viewer."}
-          {capability === "webcam" &&
-            "Your browser can't do phone-style AR, but the dragon can still show up over your webcam — grant camera access below."}
-          {capability === "checking" && "Checking what your device can do…"}
+        <p style={{ marginTop: 10, fontSize: 13, lineHeight: 1.7, opacity: 0.65 }}>
+          {HOW[mode] ?? HOW.checking}
         </p>
 
         <div
@@ -96,11 +95,54 @@ export default function DragonRematchExperience() {
             background: "#000",
           }}
         >
-          {capability === "webxr" && <WebXrDragon />}
-          {capability === "quicklook" && <QuickLookDragon />}
-          {capability === "webcam" && <WebcamDragon />}
-          {capability === "checking" && <Placeholder text="Checking device…" />}
+          {mode === "webxr" && <WebXrDragon />}
+          {mode === "camera" && <WebcamDragon />}
+          {mode === "checking" && <Placeholder text="Checking device…" />}
         </div>
+
+        {/* Quick Look is the one thing the interactive scene can't do: real,
+            tracked, room-scale placement. It just can't host the fight, so it
+            sits beside it rather than instead of it. */}
+        {quickLook && mode !== "checking" && (
+          <div style={{ marginTop: 18 }}>
+            {!showQuickLook ? (
+              <button
+                type="button"
+                onClick={() => setShowQuickLook(true)}
+                style={{
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 11,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  padding: "11px 20px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  background: "transparent",
+                  color: "rgba(255,255,255,0.75)",
+                  cursor: "pointer",
+                }}
+              >
+                Or just view it in your space
+              </button>
+            ) : (
+              <>
+                <div
+                  style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 10,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    opacity: 0.45,
+                    marginBottom: 8,
+                  }}
+                >
+                  Apple AR — placement only, no fight
+                </div>
+                <QuickLookDragon compact />
+              </>
+            )}
+          </div>
+        )}
 
         <div
           style={{

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -p ${PORT:-3000}",
-    "lint": "next lint"
+    "lint": "next lint",
+    "verify:geometry": "node scripts/verify-footprint.mjs",
+    "verify:fight": "node scripts/verify-fight.mjs"
   },
   "dependencies": {
     "next": "^14.2.35",
