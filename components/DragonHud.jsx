@@ -188,12 +188,15 @@ export default function DragonHud({
             pointerEvents: "auto",
           }}
         >
+          {/* Labelled by what they do on screen, not "circle the dragon":
+              under device orientation these move you relative to where you
+              are LOOKING, and you may not be looking at the dragon at all. */}
           <div />
-          {padButton("↑", "z", -1, "Move toward the dragon")}
+          {padButton("↑", "z", -1, "Move forward")}
           <div />
-          {padButton("←", "x", -1, "Circle left")}
-          {padButton("↓", "z", 1, "Back away")}
-          {padButton("→", "x", 1, "Circle right")}
+          {padButton("←", "x", -1, "Step left")}
+          {padButton("↓", "z", 1, "Move back")}
+          {padButton("→", "x", 1, "Step right")}
         </div>
       )}
 

@@ -155,7 +155,12 @@ const fire = (page, x = 0, y = 0.05) =>
   await page.waitForTimeout(600);
   await page.keyboard.up("ArrowRight");
   const stepped = await read(page);
-  check("stepping aside actually moves you", Math.abs(stepped.player.x) > 1.5, JSON.stringify(stepped.player));
+  /* Movement is delta-timed, so the distance covered in a fixed wall-clock
+     window depends on how many frames actually rendered -- under swiftshader
+     with the whole suite running that can be half of what a real GPU manages
+     (2.8 m idle, 1.3 m loaded). So this asserts that you moved at all and
+     that you got clear; the metre count is not the contract, escaping is. */
+  check("stepping aside actually moves you", Math.abs(stepped.player.x) > 0.8, JSON.stringify(stepped.player));
   check("stepping aside clears the strike zone", stepped.inside === false);
 
   const livesBefore = stepped.lives;
@@ -252,6 +257,27 @@ const fire = (page, x = 0, y = 0.05) =>
   const dragonMoved = Math.hypot(turned.dragon.x - placed.dragon.x, turned.dragon.z - placed.dragon.z);
   check("turning the phone turns the view", viewMoved > 0.3, `facing moved ${viewMoved.toFixed(2)}`);
   check("the dragon holds its spot while you turn", dragonMoved < 0.01, `moved ${dragonMoved.toFixed(4)} m`);
+
+  /* THE ESCAPE. A phone cannot track you walking, so the on-screen pad is the
+     only thing that moves you -- and if it does not get you clear of the
+     strike zone, the zone is centred on you forever and the dodge is a lie.
+     Driven through the real pad button, not the keyboard, because that is the
+     only control a phone actually has. */
+  await page.waitForFunction(() => window.__dragonBout.phase === "telegraph", null,
+    { timeout: 20000, polling: 20 });
+  const caught = await page.evaluate(() => !!window.__dragonBout.playerInside);
+  check("the strike zone starts on you", caught === true);
+
+  const pad = page.getByRole("button", { name: /step right/i });
+  await pad.dispatchEvent("pointerdown");
+  await page.waitForTimeout(700);
+  await pad.dispatchEvent("pointerup");
+  const escaped = await page.evaluate(() => {
+    const b = window.__dragonBout;
+    const r = (v) => Math.round(v * 100) / 100;
+    return { inside: !!b.playerInside, player: { x: r(b.debugPlayer.x), z: r(b.debugPlayer.z) } };
+  });
+  check("the pad gets you out of the strike zone", escaped.inside === false, JSON.stringify(escaped));
 
   await page.close();
 }

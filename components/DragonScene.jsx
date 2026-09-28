@@ -314,17 +314,38 @@ export default function DragonScene({
         if (rig3) rig3.getWorldPosition(dragonGround);
         dragonGround.y = groundY;
 
-        scratchA.set(camera.position.x - dragonGround.x, 0, camera.position.z - dragonGround.z);
-        const distance = scratchA.length() || 0.001;
-        scratchA.divideScalar(distance);
-        /* Tangent, signed so that "right" moves right ON SCREEN. The camera
-           looks down its own -Z at the dragon, so its screen-right is world
-           +(radial rotated -90 deg); the other sign sends ArrowRight sliding
-           left, which is worse than no dodge controls at all. */
-        scratchB.set(scratchA.z, 0, -scratchA.x); // tangent
+        if (oriented) {
+          /* Move relative to where you are LOOKING, once the phone controls
+             the view.
 
-        camera.position.addScaledVector(scratchB, x * MOVE_SPEED * delta);
-        camera.position.addScaledVector(scratchA, z * MOVE_SPEED * delta);
+             This is the difference between the dodge working and not. With no
+             positional tracking, the pad is the only way to move at all --
+             physically walking changes nothing, so the strike zone, which
+             locks onto where you are standing, sits on you and follows you no
+             matter how far you walk across the room. And a pad that strafes
+             around the DRAGON while you are free to look anywhere sends you
+             sideways for no reason you can see. Forward is where you point. */
+          scratchA.set(0, 0, -1).applyQuaternion(camera.quaternion);
+          scratchA.y = 0;
+          if (scratchA.lengthSq() < 1e-6) scratchA.set(0, 0, -1);
+          scratchA.normalize();
+          scratchB.set(-scratchA.z, 0, scratchA.x); // screen-right
+
+          camera.position.addScaledVector(scratchB, x * MOVE_SPEED * delta);
+          camera.position.addScaledVector(scratchA, -z * MOVE_SPEED * delta);
+        } else {
+          scratchA.set(camera.position.x - dragonGround.x, 0, camera.position.z - dragonGround.z);
+          const distance = scratchA.length() || 0.001;
+          scratchA.divideScalar(distance);
+          /* Tangent, signed so that "right" moves right ON SCREEN. The camera
+             looks down its own -Z at the dragon, so its screen-right is world
+             +(radial rotated -90 deg); the other sign sends ArrowRight sliding
+             left, which is worse than no dodge controls at all. */
+          scratchB.set(scratchA.z, 0, -scratchA.x); // tangent
+
+          camera.position.addScaledVector(scratchB, x * MOVE_SPEED * delta);
+          camera.position.addScaledVector(scratchA, z * MOVE_SPEED * delta);
+        }
 
         scratchA.set(camera.position.x - dragonGround.x, 0, camera.position.z - dragonGround.z);
         const next = scratchA.length() || 0.001;
