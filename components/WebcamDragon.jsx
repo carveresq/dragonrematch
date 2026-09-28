@@ -5,6 +5,7 @@ import { Canvas } from "@react-three/fiber";
 
 import DragonScene from "./DragonScene";
 import DragonHud from "./DragonHud";
+import { useDeviceOrientation } from "../lib/useDeviceOrientation";
 
 // Laptops and desktops get neither real WebXR immersive-ar (no headset) nor
 // Apple AR Quick Look (not iOS) -- and as of this round, iPhones and iPads are
@@ -58,6 +59,9 @@ export default function WebcamDragon() {
   const [errorMsg, setErrorMsg] = useState("");
   const [snapshot, setSnapshot] = useState(null);
   const [runId, setRunId] = useState(0);
+  const [placed, setPlaced] = useState(false);
+  const placeRef = useRef(null);
+  const { status: tiltStatus, orientationRef, request: requestTilt } = useDeviceOrientation();
 
   /* ?nocam=1 mounts the fight over a flat backdrop with no getUserMedia call.
      It exists so the scene can be driven and screenshotted without a camera
@@ -70,13 +74,25 @@ export default function WebcamDragon() {
   }, []);
 
   useEffect(() => {
-    if (noCam) setStatus("active");
-  }, [noCam]);
+    if (!noCam) return;
+    // nocam stands in for the Enable Camera press, so it has to ask for tilt
+    // too -- otherwise the debug path silently exercises the desktop
+    // behaviour and the phone behaviour goes unchecked.
+    requestTilt();
+    setStatus("active");
+  }, [noCam, requestTilt]);
 
   const handleEnable = useCallback(async () => {
     setStatus("starting");
     setErrorMsg("");
     try {
+      /* Asked here, inside the button press, because iOS 13+ only honours
+         DeviceOrientationEvent.requestPermission() from a user gesture -- ask
+         a tick later and it rejects. Failing is fine: without tilt the scene
+         places itself and plays with the dodge pad, it just cannot be looked
+         away from. */
+      await requestTilt();
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: false,
@@ -91,7 +107,7 @@ export default function WebcamDragon() {
       setErrorMsg(cameraErrorMessage(err));
       setStatus("error");
     }
-  }, []);
+  }, [requestTilt]);
 
   useEffect(() => () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -99,8 +115,14 @@ export default function WebcamDragon() {
 
   const handleReplay = useCallback(() => {
     setSnapshot(null);
+    setPlaced(false);
     setRunId((n) => n + 1);
   }, []);
+
+  const handlePlace = useCallback(() => { placeRef.current?.(); }, []);
+
+  // Only phones reach this: with no tilt the scene places itself.
+  const awaitingPlacement = tiltStatus === "granted" && !placed;
 
   const hitFlash = snapshot?.playerHitFlashUntil ?? 0;
 
@@ -145,15 +167,66 @@ export default function WebcamDragon() {
               groundY={0}
               controlsRef={controlsRef}
               onSnapshot={setSnapshot}
+              orientationRef={orientationRef}
+              placeRef={placeRef}
+              onPlacedChange={setPlaced}
             />
           </Canvas>
 
-          <DragonHud
-            snapshot={snapshot}
-            controlsRef={controlsRef}
-            showDodgePad
-            onReplay={handleReplay}
-          />
+          {!awaitingPlacement && (
+            <DragonHud
+              snapshot={snapshot}
+              controlsRef={controlsRef}
+              showDodgePad
+              onReplay={handleReplay}
+            />
+          )}
+
+          {/* Placement. Point the phone where you want it to stand and tap --
+              from then on the dragon holds that spot in the room and you turn
+              to find it, rather than it following the middle of the screen. */}
+          {awaitingPlacement && (
+            <div
+              style={{
+                position: "absolute", inset: 0, display: "flex",
+                flexDirection: "column", alignItems: "center", justifyContent: "flex-end",
+                gap: 14, paddingBottom: 38, pointerEvents: "none",
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute", top: "50%", left: "50%",
+                  width: 120, height: 120, marginLeft: -60, marginTop: -60,
+                  borderRadius: "50%", border: "1px solid rgba(124,252,154,0.85)",
+                  boxShadow: "0 0 24px rgba(124,252,154,0.35)",
+                }}
+              />
+              <div
+                style={{
+                  fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
+                  letterSpacing: "0.12em", textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.8)", textAlign: "center",
+                  textShadow: "0 1px 6px rgba(0,0,0,0.9)",
+                }}
+              >
+                Point at the floor where it should stand
+              </div>
+              <button
+                type="button"
+                onClick={handlePlace}
+                style={{
+                  pointerEvents: "auto",
+                  fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
+                  letterSpacing: "0.1em", textTransform: "uppercase",
+                  padding: "14px 28px", borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.6)",
+                  background: "rgba(10,10,10,0.8)", color: "#fff", cursor: "pointer",
+                }}
+              >
+                Place the dragon
+              </button>
+            </div>
+          )}
 
           {/* A hit is easy to miss when you are looking at the dragon rather
               than at the bar -- so the whole frame takes the hit too. */}

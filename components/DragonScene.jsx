@@ -39,6 +39,16 @@ const LOOK_AT_HEIGHT = DRAGON_TARGET_HEIGHT_M * 0.55;
    would be invisible. */
 const MUZZLE_OFFSET = new THREE.Vector3(0.5, -0.42, -0.9);
 const MISS_RANGE = 28;
+/* How far ahead of you the dragon is stood when you tap Place. Far enough that
+   a 6 m creature fits in the frame on a phone held at arm's length. */
+const PLACE_DISTANCE = 9;
+/* How long to wait for the first device-orientation event before concluding
+   there will never be one and placing the dragon automatically.
+   Without this the scene auto-places on frame 1 -- which beats the first
+   orientation event to the punch on every phone, so the dragon is dropped at
+   a spot nobody chose and the Place button never appears at all. Events start
+   arriving within ~100ms when the sensor is live, so this is generous. */
+const TILT_GRACE_MS = 900;
 
 function LoadingLabel() {
   return (
@@ -79,6 +89,9 @@ export default function DragonScene({
   onSnapshot,
   controlsRef,
   fireRef,
+  orientationRef,
+  placeRef,
+  onPlacedChange,
 }) {
   const { camera, gl } = useThree();
 
@@ -89,6 +102,14 @@ export default function DragonScene({
   const mouthRef = useRef(new THREE.Vector3(0, DRAGON_TARGET_HEIGHT_M * 0.8, 0));
   const pendingRef = useRef([]);
   const snapshotRef = useRef({ hp: -1, lives: -1, phase: "", result: null, playerInside: false });
+  const anchorRef = useRef(null);
+  /* Where the dragon stands. On a phone this is chosen by tapping Place, and
+     from then on the dragon is a fixed point in the room rather than
+     something glued to the middle of the lens. With no device orientation
+     available (a desktop) there is nothing to anchor against and no way to
+     look away from it, so it places itself immediately and the fight starts. */
+  const placedRef = useRef(false);
+  const graceStartRef = useRef(0);
 
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const scratchA = useMemo(() => new THREE.Vector3(), []);
@@ -157,6 +178,33 @@ export default function DragonScene({
     [camera, raycaster, scratchA, scratchB],
   );
 
+  /* Drop the dragon on the floor in whatever direction you are facing, at a
+     fixed distance. Deliberately NOT a hit test: a plain camera feed has no
+     depth, so there is no surface to test against -- the floor is assumed to
+     be at groundY and the dragon is stood on it ahead of you. The real
+     hit-tested version is the WebXR path. */
+  const place = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor || placedRef.current) return;
+
+    scratchA.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    scratchA.y = 0;
+    if (scratchA.lengthSq() < 1e-6) scratchA.set(0, 0, -1);
+    scratchA.normalize();
+
+    anchor.position.set(
+      camera.position.x + scratchA.x * PLACE_DISTANCE,
+      groundY,
+      camera.position.z + scratchA.z * PLACE_DISTANCE,
+    );
+    placedRef.current = true;
+    onPlacedChange?.(true);
+  }, [camera, groundY, onPlacedChange, scratchA]);
+
+  useEffect(() => {
+    if (placeRef) placeRef.current = place;
+  }, [place, placeRef]);
+
   useEffect(() => {
     if (fireRef) fireRef.current = fireAt;
     if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
@@ -213,6 +261,48 @@ export default function DragonScene({
     const now = state.clock.elapsedTime * 1000;
     bout.clockNow = now;
 
+    /* ---- the phone is the camera ---------------------------------- *
+       When real device orientation is coming in, it owns where the camera is
+       pointed. That is the whole difference between a dragon standing in your
+       room and a dragon stuck to your lens: turn away and it should be behind
+       you, which cannot happen while a lookAt drags it back to centre. */
+    const oriented = mode === "camera" && orientationRef?.current?.active === true;
+    if (oriented) camera.quaternion.copy(orientationRef.current.quaternion);
+
+    /* Desktop has no orientation to wait for, so it places itself and plays
+       straight away -- same fight, just framed for a mouse. A phone must NOT
+       fall through here, so give the sensor a moment to speak up first. */
+    if (mode === "camera" && !placedRef.current && !oriented) {
+      if (!graceStartRef.current) graceStartRef.current = now;
+      if (now - graceStartRef.current > TILT_GRACE_MS) place();
+    }
+
+    /* Report state BEFORE the pre-placement bail-out. Writing it after meant
+       nothing could observe the scene during placement -- which is exactly
+       the window where the placement bug lived. */
+    if (process.env.NODE_ENV !== "production") {
+      camera.getWorldPosition(playerRef.current);
+      bout.debugPlayer = { x: playerRef.current.x, z: playerRef.current.z };
+      bout.debugPlaced = placedRef.current;
+      bout.debugOriented = oriented;
+      bout.debugMode = mode;
+      bout.debugControls = controlsRef?.current ? { ...controlsRef.current } : null;
+      if (anchorRef.current) {
+        anchorRef.current.getWorldPosition(scratchB);
+        bout.debugDragon = { x: scratchB.x, y: scratchB.y, z: scratchB.z };
+      }
+      // Where the camera looks, flattened -- lets a check tell "the dragon
+      // moved" apart from "I turned away from it".
+      scratchB.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      bout.debugFacing = { x: scratchB.x, z: scratchB.z };
+    }
+
+    /* Nothing happens until the dragon has somewhere to stand. */
+    if (mode === "camera" && !placedRef.current) {
+      camera.getWorldPosition(playerRef.current);
+      return;
+    }
+
     /* ---- move the player ------------------------------------------ */
     if (mode === "camera" && controlsRef?.current) {
       const { x, z } = controlsRef.current;
@@ -241,7 +331,8 @@ export default function DragonScene({
         const clamped = THREE.MathUtils.clamp(next, MIN_DISTANCE, MAX_DISTANCE);
         scratchA.multiplyScalar(clamped / next);
         camera.position.set(dragonGround.x + scratchA.x, EYE_HEIGHT + groundY, dragonGround.z + scratchA.z);
-        camera.lookAt(dragonGround.x, groundY + LOOK_AT_HEIGHT, dragonGround.z);
+        // Only steer the view when the phone is not already doing it.
+        if (!oriented) camera.lookAt(dragonGround.x, groundY + LOOK_AT_HEIGHT, dragonGround.z);
       }
     }
 
@@ -269,12 +360,6 @@ export default function DragonScene({
     /* Am I standing in it right now? Needed by the HUD, because in first
        person the danger zone is centred on your own feet and is therefore the
        hardest thing on screen to notice. */
-    if (process.env.NODE_ENV !== "production") {
-      bout.debugPlayer = { x: playerGround.x, z: playerGround.z };
-      bout.debugControls = controlsRef?.current ? { ...controlsRef.current } : null;
-      bout.debugMode = mode;
-    }
-
     bout.playerInside =
       (bout.phase === "telegraph" || bout.phase === "breathe") &&
       isInsideFootprint(bout.footprint, playerGround);
@@ -311,9 +396,11 @@ export default function DragonScene({
         />
       )}
 
-      <Suspense fallback={<LoadingLabel />}>
-        <DragonRig ref={rigRef} boutRef={boutRef} playerRef={playerRef} />
-      </Suspense>
+      <group ref={anchorRef}>
+        <Suspense fallback={<LoadingLabel />}>
+          <DragonRig ref={rigRef} boutRef={boutRef} playerRef={playerRef} />
+        </Suspense>
+      </group>
 
       <GroundThreat boutRef={boutRef} />
       <FireBreath boutRef={boutRef} mouthRef={mouthRef} />

@@ -58,8 +58,27 @@ const browser = await chromium.launch({
   args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
 });
 
-async function openFight() {
-  const page = await browser.newPage({ viewport: { width: 900, height: 1150 } });
+async function openFight({ tilt = false, viewport = { width: 900, height: 1150 } } = {}) {
+  const page = await browser.newPage({ viewport });
+  if (tilt) {
+    /* Stand in for a phone's motion sensor, and start BEFORE any app code
+       runs -- a real sensor is already live at page load and the scene only
+       waits ~900ms for it. Pumping from a later evaluate() raced that window
+       and made the phone path look like the desktop one. */
+    await page.addInitScript(() => {
+      window.__alpha = 0;
+      const pump = () => {
+        const e = new Event("deviceorientation");
+        Object.defineProperties(e, {
+          alpha: { value: window.__alpha }, beta: { value: 70 },
+          gamma: { value: 0 }, absolute: { value: true },
+        });
+        window.dispatchEvent(e);
+        requestAnimationFrame(pump);
+      };
+      requestAnimationFrame(pump);
+    });
+  }
   const logs = [];
   page.on("console", (m) => logs.push(m.text()));
   page.on("pageerror", (e) => { failures += 1; console.log("FAIL  page error  --", e.message); });
@@ -187,6 +206,53 @@ const fire = (page, x = 0, y = 0.05) =>
   }
   const lost = await read(page);
   check("standing still loses the bout in two hits", lost.result === "lost" && lost.lives === 0, JSON.stringify(lost));
+  await page.close();
+}
+
+/* ================= placement, on a phone =================
+   The dragon has to stand somewhere in the room and STAY there when you turn
+   away from it. The camera path used to pin it dead-centre with a lookAt
+   every frame, which is not a dragon in your room -- it is a dragon stuck to
+   your lens, and no screenshot of it looks any different. */
+{
+  const { page } = await openFight({ tilt: true, viewport: { width: 500, height: 900 } });
+
+  const state = () =>
+    page.evaluate(() => {
+      const b = window.__dragonBout;
+      const r = (v) => Math.round(v * 100) / 100;
+      return {
+        placed: !!b.debugPlaced, oriented: !!b.debugOriented,
+        dragon: b.debugDragon ? { x: r(b.debugDragon.x), z: r(b.debugDragon.z) } : null,
+        facing: b.debugFacing ? { x: r(b.debugFacing.x), z: r(b.debugFacing.z) } : null,
+        player: b.debugPlayer ? { x: r(b.debugPlayer.x), z: r(b.debugPlayer.z) } : null,
+      };
+    });
+
+  await page.waitForTimeout(500);
+  const before = await state();
+  check("device tilt is picked up as the camera", before.oriented === true, JSON.stringify(before));
+  check("it waits for you to choose the spot", before.placed === false, JSON.stringify(before));
+
+  await page.getByRole("button", { name: /place the dragon/i }).click();
+  await page.waitForTimeout(400);
+  const placed = await state();
+  check("placing gives it a spot in the room", placed.placed === true, JSON.stringify(placed.dragon));
+
+  const out = Math.hypot(placed.dragon.x - placed.player.x, placed.dragon.z - placed.player.z);
+  check("it stands ~9 m from you", out > 7 && out < 11, `${out.toFixed(2)} m`);
+
+  for (const a of [30, 60, 90, 120]) {
+    await page.evaluate((v) => { window.__alpha = v; }, a);
+    await page.waitForTimeout(140);
+  }
+  await page.waitForTimeout(400);
+  const turned = await state();
+  const viewMoved = Math.hypot(turned.facing.x - placed.facing.x, turned.facing.z - placed.facing.z);
+  const dragonMoved = Math.hypot(turned.dragon.x - placed.dragon.x, turned.dragon.z - placed.dragon.z);
+  check("turning the phone turns the view", viewMoved > 0.3, `facing moved ${viewMoved.toFixed(2)}`);
+  check("the dragon holds its spot while you turn", dragonMoved < 0.01, `moved ${dragonMoved.toFixed(4)} m`);
+
   await page.close();
 }
 
