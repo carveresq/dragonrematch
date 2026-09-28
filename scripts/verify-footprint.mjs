@@ -15,6 +15,8 @@
 import {
   footprintFromCone,
   isInsideFootprint,
+  safePointsAround,
+  footprintRadius,
   FIRE_CONE_HALF_ANGLE,
   MAX_FOOTPRINT_R,
 } from "../lib/footprint.mjs";
@@ -81,6 +83,10 @@ const CASES = [
 ];
 
 let failures = 0;
+const check = (label, ok, detail) => {
+  if (!ok) failures += 1;
+  console.log(`${ok ? "OK  " : "FAIL"}  ${label}${detail ? `  -- ${detail}` : ""}`);
+};
 const TOL = 0.005; // 0.5% -- the solve is exact, so this is discretisation only
 console.log(`cone half-angle = ${(THETA * 180 / Math.PI).toFixed(2)} deg`);
 console.log(`${"case".padEnd(14)} ${"closed a".padEnd(10)}${"sampled a".padEnd(11)}${"closed b".padEnd(10)}${"sampled b".padEnd(11)}${"err a".padEnd(9)}${"err b".padEnd(9)}`);
@@ -217,6 +223,69 @@ const naive = (() => {
 const exact = footprintFromCone({ x: 0, y: 4.2, z: 0 }, { x: 0, y: 0, z: 8 }, {});
 console.log(`naive circle r=${naive.toFixed(3)} vs exact a=${exact.a.toFixed(3)} b=${exact.b.toFixed(3)}` +
   `  -- naive under-reports down-range by ${(((exact.a - naive) / exact.a) * 100).toFixed(0)}%`);
+
+/* ------------------------------------------------------------------ *
+   Safe points.
+
+   These are what the player is told to run to, so "is it actually safe" is
+   checked against the SAMPLED cone curve rather than by asking the same
+   ellipse maths that produced the marker. And "is it actually reachable"
+   matters just as much: the camera path has no positional tracking, so an
+   escape longer than speed * time is not a hard dodge, it is an impossible
+   one -- the defect that shipped in v4.
+   ------------------------------------------------------------------ */
+console.log("");
+{
+  const SPEED = 4.6, TIME = 2.2, MARGIN = 0.7;
+  const reach = SPEED * TIME;
+
+  const mouth = { x: 0, y: 4.2, z: 0 };
+  const aim = { x: 0, y: 0, z: 8 };
+  const fp = footprintFromCone(mouth, aim, {});
+  const curve = extremePoints(mouth, aim, 0, 40000);
+
+  const pts = safePointsAround([fp], { x: aim.x, z: aim.z }, { speed: SPEED, timeLeft: TIME, margin: MARGIN });
+  check("safe points are offered at all", pts.length > 0, `${pts.length} points`);
+
+  // Independent: nearest approach to the real cone-floor curve.
+  let worstGap = Infinity;
+  for (const p of pts) {
+    let nearest = Infinity;
+    for (const c of curve) {
+      const d = Math.hypot(p.x - c.x, p.z - c.z);
+      if (d < nearest) nearest = d;
+    }
+    if (footprintRadius(fp, p) <= 1) nearest = -nearest; // inside counts as negative
+    worstGap = Math.min(worstGap, nearest);
+  }
+  check("every safe point clears the real burn curve by the margin",
+    worstGap >= MARGIN, `closest approach ${worstGap.toFixed(2)} m, margin ${MARGIN}`);
+
+  const farthest = Math.max(...pts.map((p) => p.distance));
+  check("no safe point is farther than the player can run",
+    farthest <= reach + 1e-6, `farthest ${farthest.toFixed(2)} m, reach ${reach.toFixed(2)} m`);
+
+  const spread = new Set(pts.map((p) => p.distance.toFixed(1))).size;
+  check("safe points sit at different distances", spread === pts.length,
+    pts.map((p) => `${p.distance.toFixed(1)}m`).join(", "));
+
+  /* NEGATIVE CONTROL. With everything in range covered, the honest answer is
+     "nowhere" -- and it must not be a best-effort point that is secretly on
+     fire. Without this, "all returned points are safe" passes trivially on an
+     empty list, which is the vacuous check in yet another costume. */
+  const smother = { a: 50, b: 50, yaw: 0, cx: 0, cz: 8 };
+  const none = safePointsAround([smother], { x: 0, z: 8 }, { speed: SPEED, timeLeft: TIME, margin: MARGIN });
+  check("returns nothing when nowhere is safe", none.length === 0, `${none.length} points`);
+
+  const noTime = safePointsAround([fp], { x: 0, z: 8 }, { speed: SPEED, timeLeft: 0, margin: MARGIN });
+  check("returns nothing when there is no time", noTime.length === 0, `${noTime.length} points`);
+
+  /* And the control on the control: the smother test above only proves
+     anything if the same call DOES return points once the cover is lifted. */
+  const lifted = safePointsAround([{ a: 6, b: 6, yaw: 0, cx: 0, cz: 8 }], { x: 0, z: 8 },
+    { speed: SPEED, timeLeft: TIME, margin: MARGIN });
+  check("and finds them again when the cover is lifted", lifted.length > 0, `${lifted.length} points`);
+}
 
 console.log(failures === 0 ? "\nAll footprint checks passed." : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

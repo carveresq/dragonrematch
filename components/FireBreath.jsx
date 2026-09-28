@@ -4,7 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-import { fireEnvelope, FIRE_CONE_HALF_ANGLE } from "../lib/dragonBout";
+import { fireEnvelope, currentAim, FIRE_CONE_HALF_ANGLE } from "../lib/dragonBout";
 
 /* Hot-orange rather than the pink/neon-blue rotation the Round 1-3 dragon
    cycles through. That palette belongs to an arcade scene on a dark page; this
@@ -100,8 +100,14 @@ export default function FireBreath({ boutRef, mouthRef }) {
        under whatever parent the scene mounted (in real AR that is the placed
        anchor, which can sit anywhere and at any rotation), so both have to be
        brought into the parent's frame rather than assumed to be world. */
+    /* Aim at whichever sample the fire has reached, so a sweep visibly sweeps
+       and a volley visibly re-aims between bursts, instead of every attack
+       looking like one fixed jet. */
+    const aim = currentAim(bout, now);
     localMouth.copy(mouthRef.current);
-    localAim.set(bout.footprint.cx, bout.aim.y, bout.footprint.cz);
+    if (aim) localAim.set(aim.x, aim.y, aim.z);
+    else if (bout.footprints?.length) localAim.set(bout.footprints[0].cx, bout.aim.y, bout.footprints[0].cz);
+    else localAim.set(bout.aim.x, bout.aim.y, bout.aim.z);
     if (group.parent) {
       group.parent.worldToLocal(localMouth);
       group.parent.worldToLocal(localAim);

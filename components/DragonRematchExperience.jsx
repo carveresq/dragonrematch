@@ -66,16 +66,41 @@ export default function DragonRematchExperience() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 640 }}>
-        <div
-          style={{
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: 11,
-            letterSpacing: "0.14em",
-            textTransform: "uppercase",
-            opacity: 0.6,
-          }}
-        >
-          Round 4 — the rematch
+        {/* The Carver Esq dragon mark.
+            First published here on 2026-09-28, which is the date of first use
+            in commerce for this mark -- recorded because common-law rights run
+            from first use, not from filing. Marked TM (not (R)) since it is
+            unregistered.
+
+            Served as WebP with a PNG fallback: the source art is a 1.67 MB
+            1254px PNG, which is not something to put at the top of a page whose
+            whole point is to be opened on a phone. 640px WebP is 52 KB. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+          <picture>
+            <source srcSet="/brand/carver-dragon-mark.webp" type="image/webp" />
+            <img
+              src="/brand/carver-dragon-mark.png"
+              alt="Carver Esq dragon mark"
+              width={96}
+              height={96}
+              style={{ display: "block", width: 96, height: 96, objectFit: "contain" }}
+            />
+          </picture>
+          <div
+            style={{
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 11,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              opacity: 0.6,
+              lineHeight: 1.8,
+            }}
+          >
+            Round 4 — the rematch
+            <div style={{ opacity: 0.55, letterSpacing: "0.1em" }}>
+              Carver Esq<span style={{ verticalAlign: "super", fontSize: 8 }}>™</span>
+            </div>
+          </div>
         </div>
 
         <p style={{ marginTop: 14, fontSize: 15, lineHeight: 1.7 }}>

@@ -101,7 +101,13 @@ export default function DragonScene({
   const playerRef = useRef(new THREE.Vector3(0, EYE_HEIGHT, START_DISTANCE));
   const mouthRef = useRef(new THREE.Vector3(0, DRAGON_TARGET_HEIGHT_M * 0.8, 0));
   const pendingRef = useRef([]);
-  const snapshotRef = useRef({ hp: -1, lives: -1, phase: "", result: null, playerInside: false });
+  /* Rolling average, not a single frame's delta: the lead attack aims at
+     position + velocity * time, and one jittery frame would throw the aim
+     somewhere the player was never going. */
+  const velocityRef = useRef({ x: 0, z: 0 });
+  const lastGroundRef = useRef(null);
+  const snapshotRef = useRef({ hp: -1, lives: -1, phase: "", result: null, playerInside: false,
+    score: -1, kind: null, nearestSafe: null });
   const anchorRef = useRef(null);
   /* Where the dragon stands. On a phone this is chosen by tapping Place, and
      from then on the dragon is a fixed point in the room rather than
@@ -360,6 +366,18 @@ export default function DragonScene({
     camera.getWorldPosition(playerRef.current);
     playerGround.set(playerRef.current.x, groundY, playerRef.current.z);
 
+    if (delta > 0) {
+      const prev = lastGroundRef.current;
+      if (prev) {
+        const vx = (playerGround.x - prev.x) / delta;
+        const vz = (playerGround.z - prev.z) / delta;
+        const k = Math.min(1, delta * 6); // ~170ms smoothing
+        velocityRef.current.x += (vx - velocityRef.current.x) * k;
+        velocityRef.current.z += (vz - velocityRef.current.z) * k;
+      }
+      lastGroundRef.current = { x: playerGround.x, z: playerGround.z };
+    }
+
     rig.readMouth(mouthRef.current);
 
     /* ---- resolve landed bolts ------------------------------------- */
@@ -375,6 +393,7 @@ export default function DragonScene({
       mouth: mouthRef.current,
       playerGround,
       groundY,
+      playerVelocity: velocityRef.current,
       playAttack: () => rig.playAttack(),
     });
 
@@ -383,7 +402,16 @@ export default function DragonScene({
        hardest thing on screen to notice. */
     bout.playerInside =
       (bout.phase === "telegraph" || bout.phase === "breathe") &&
-      isInsideFootprint(bout.footprint, playerGround);
+      (bout.footprints || []).some((fp) => isInsideFootprint(fp, playerGround));
+
+    /* Live distance to the nearest marked escape, recomputed every frame while
+       the marker SET is only searched once at lock. */
+    let nearest = null;
+    for (const sp of bout.safePoints || []) {
+      const d = Math.hypot(sp.x - playerGround.x, sp.z - playerGround.z);
+      if (nearest === null || d < nearest) nearest = d;
+    }
+    bout.nearestSafe = nearest;
 
     /* ---- lift only what the HUD actually shows -------------------- */
     const snap = snapshotRef.current;
@@ -392,13 +420,19 @@ export default function DragonScene({
       snap.lives !== bout.lives ||
       snap.phase !== bout.phase ||
       snap.result !== bout.result ||
-      snap.playerInside !== bout.playerInside
+      snap.playerInside !== bout.playerInside ||
+      snap.score !== bout.score ||
+      snap.kind !== bout.attack?.kind ||
+      Math.round((snap.nearestSafe ?? -1) * 2) !== Math.round((bout.nearestSafe ?? -1) * 2)
     ) {
       snap.hp = bout.hp;
       snap.lives = bout.lives;
       snap.phase = bout.phase;
       snap.result = bout.result;
       snap.playerInside = bout.playerInside;
+      snap.score = bout.score;
+      snap.kind = bout.attack?.kind ?? null;
+      snap.nearestSafe = bout.nearestSafe;
       onSnapshot?.({ ...snap, playerHitFlashUntil: bout.playerHitFlashUntil });
     }
   });

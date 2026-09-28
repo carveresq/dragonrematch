@@ -16,6 +16,17 @@ const PHASE_LABEL = {
   lost: "",
 };
 
+/* Named so the tell is learnable. "It is aiming ahead of you" is the only
+   warning that a straight run walks into the fire, and no amount of watching
+   the floor conveys it in time. */
+const KIND_LABEL = {
+  spot: "Aimed at you",
+  lead: "Aiming ahead of you — change direction",
+  wide: "Wide burn — leave the area",
+  multi: "Three bursts — find the gap",
+  sweep: "Sweeping — outrun it",
+};
+
 function Bar({ label, value, max, color, trackColor }) {
   const pct = Math.max(0, Math.min(1, value / max)) * 100;
   return (
@@ -59,6 +70,9 @@ export default function DragonHud({
      dragon -- so it gets the loudest treatment in the HUD rather than relying
      on the player noticing the floor. */
   const inside = Boolean(snapshot?.playerInside) && !result;
+  const score = snapshot?.score ?? 0;
+  const kind = snapshot?.kind ?? null;
+  const nearestSafe = snapshot?.nearestSafe;
 
   const press = useCallback(
     (axis, value) => (event) => {
@@ -136,7 +150,25 @@ export default function DragonHud({
               color: inside ? "#ff4d2b" : phase === "telegraph" ? "#ffd24a" : phase === "winded" ? "#8ef6ff" : "#fff",
             }}
           >
-            {inside ? "Step out — you're in it" : PHASE_LABEL[phase] ?? ""}
+            {inside
+              ? "Step out — you're in it"
+              : phase === "telegraph" && kind && KIND_LABEL[kind]
+                ? KIND_LABEL[kind]
+                : PHASE_LABEL[phase] ?? ""}
+          </div>
+        )}
+
+        {/* Live distance to the nearest marked escape, and the running score.
+            The distance is the useful number: it updates as you move, so you
+            can tell whether you are going to make it. */}
+        {!result && (
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontFamily: mono, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.7 }}>
+            <span style={{ color: phase === "telegraph" ? "#7cfc9a" : "inherit" }}>
+              {phase === "telegraph" && typeof nearestSafe === "number"
+                ? `Safe in ${nearestSafe.toFixed(1)} m`
+                : "\u00a0"}
+            </span>
+            <span>{score > 0 ? `${score} pts` : "\u00a0"}</span>
           </div>
         )}
       </div>
@@ -257,8 +289,8 @@ export default function DragonHud({
           </div>
           <div style={{ fontFamily: mono, fontSize: 12, opacity: 0.6, textAlign: "center", maxWidth: 320, lineHeight: 1.6, padding: "0 24px" }}>
             {result === "won"
-              ? "Four rounds, and the last one in your own room."
-              : "Two hits was all it needed. Watch the ring on the floor."}
+              ? `Four rounds, and the last one in your own room.${score > 0 ? ` ${score} points for the running.` : ""}`
+              : `Two hits was all it needed. Follow the green markers — they only appear where you can actually get to.${score > 0 ? ` ${score} points.` : ""}`}
           </div>
           <button
             type="button"
